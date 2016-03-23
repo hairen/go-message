@@ -7,37 +7,48 @@ import (
   "io"
   "strconv"
   "bufio"
+  "strings"
 )
 
 type Client struct {
-  id      string
-  conn    net.Conn
-  message chan Message
+  Id          string
+  Conn        net.Conn
+  MessageChan chan Message
 }
 
 type Message struct {
-  from  string
-  body  string
-  // to    string
+  From  string
+  To    string
+  Body  string
+}
+
+type Hub struct {
+	Clients      map[string]Client
+	JoinChan     chan Client
+	LeaveChan    chan Client
+	MessageChan  chan Message
 }
 
 var idGenerationChan = make(chan string)
 
 func main() {
   hub, err := net.Listen("tcp", ":8000") // Create a hub on port 8000
+
   if err != nil {
     log.Fatalln(err.Error())
   }
-  defer hub.Close()
 
-  joinChan := make(chan Client)
-  leaveChan := make(chan Client)
-  messageChan := make(chan Message)
-  liveClients := make(map[string]Client)
+  defer hub.Close()
 
   go IdGenerator()
 
-  go HandleMessages(messageChan, joinChan, leaveChan, liveClients)
+  messageHub := &Hub{
+		Clients:      make(map[string]Client),
+		JoinChan:     make(chan Client),
+		LeaveChan:    make(chan Client),
+		MessageChan:  make(chan Message),
+	}
+  go messageHub.Run()
 
   fmt.Println("Listening on port 8000")
 
@@ -47,74 +58,80 @@ func main() {
       log.Fatalln(err.Error())
     }
 
-    go HandleConnection(conn, joinChan, leaveChan, messageChan, liveClients)
+    go HandleConnection(conn, messageHub)
   }
 }
 
-func HandleMessages(messageChan <-chan Message, joinChan <-chan Client, leaveChan <-chan Client, liveClients map[string]Client) {
-  clients := make(map[net.Conn] chan<- Message)
-
+func (h *Hub) Run() {
   for {
-		select {
-    case msg := <- messageChan:
-      for _, ch := range clients {
-          go func (mch chan<- Message)  {
-              mch <- msg
-          }(ch)
-      }
-		case client := <-joinChan:
-      clients[client.conn] = client.message
-      liveClients[client.id] = client
-		case client := <-leaveChan:
-      delete(clients, client.conn)
-      delete(liveClients, client.id)
-  	}
-	}
+    select {
+    case msg := <- h.MessageChan:
+      for _, client := range h.Clients {
+				select {
+				case client.MessageChan <- msg:
+				default:
+				}
+			}
+    case client := <-h.JoinChan:
+      h.Clients[client.Id] = client
+    case client := <-h.LeaveChan:
+      delete(h.Clients, client.Id)
+    }
+  }
 }
 
-func HandleConnection(conn net.Conn, joinChan chan<- Client, leaveChan chan<- Client, messageChan chan<- Message, liveClients map[string]Client)  {
+func HandleConnection(conn net.Conn, h *Hub)  {
   defer conn.Close()
 
   scanner := bufio.NewScanner(conn)
 
   var id = <- idGenerationChan
   client := Client{
-    message:  make(chan Message),
-    conn:     conn,
-    id:       id,
+    MessageChan:  make(chan Message),
+    Conn:     conn,
+    Id:       id,
   }
   io.WriteString(conn, "Welcome! Your User ID is " + id)
 
-  joinChan <- client
+  h.JoinChan <- client
 
   defer func(){
-    leaveChan <- client
+    h.LeaveChan <- client
   }()
 
 
   go func() {
   	for scanner.Scan() {
   		ln := scanner.Text()
+
       if ln == "whoami" {
-        client.conn.Write([]byte("Your user id: "+client.id+"\n"))
+        client.Conn.Write([]byte("Your user Id: "+client.Id+"\n"))
       }else if ln == "whoishere" {
         ids := "";
-        for key, _ := range liveClients {
-          if (key != client.id) {
+        for key, _ := range h.Clients {
+          if (key != client.Id) {
             ids += key
           }
         }
-        client.conn.Write([]byte("Here is "+ids+"\n"))
+        client.Conn.Write([]byte("Here is "+ids+"\n"))
+      }else if strings.Contains(ln, ":") {
+        arr := strings.Split(ln, ":")
+        body := arr[0]
+        receivers := strings.Split(arr[1], ",")
+
+        for _, to := range receivers {
+          h.MessageChan <- Message{client.Id, to, body}
+        }
       }else {
-        messageChan <- Message{client.id, ln}
+        h.MessageChan  <- Message{client.Id, "all", ln}
       }
   	}
   }()
 
 
-  for msg := range client.message {
-    if msg.from != client.id {
-      _, err := io.WriteString(conn, msg.from+": "+msg.body+"\n")
+  for msg := range client.MessageChan {
+    if msg.To == client.Id {
+      _, err := io.WriteString(conn, "\n"+msg.From+": "+msg.Body+"\n")
       if err != nil {
         break
       }
