@@ -3,24 +3,22 @@ package main
 import (
   "fmt"
   "net"
-  "os"
   "log"
-  "strconv"
   "io"
+  "strconv"
   "bufio"
-  "strings"
 )
 
 type Client struct {
-  userId  string
+  id      string
   conn    net.Conn
-  ch      chan Message
+  message chan Message
 }
 
 type Message struct {
   from  string
-  to    string
   body  string
+  // to    string
 }
 
 var idGenerationChan = make(chan string)
@@ -28,99 +26,105 @@ var idGenerationChan = make(chan string)
 func main() {
   hub, err := net.Listen("tcp", ":8000") // Create a hub on port 8000
   if err != nil {
-    fmt.Println(err)
-    os.Exit(1)
+    log.Fatalln(err.Error())
   }
+  defer hub.Close()
 
-  newClient := make(chan Client)
-  deadClient := make(chan Client)
-  messages := make(chan Message)
+  joinChan := make(chan Client)
+  leaveChan := make(chan Client)
+  messageChan := make(chan Message)
+  liveClients := make(map[string]Client)
 
   go IdGenerator()
 
-  go HandleMessages(messages, newClient, deadClient)
+  go HandleMessages(messageChan, joinChan, leaveChan, liveClients)
 
   fmt.Println("Listening on port 8000")
 
   for {
     conn, err := hub.Accept()
     if err != nil {
-      fmt.Println(err)
-      continue
+      log.Fatalln(err.Error())
     }
 
-    go HandleConnection(conn, newClient, deadClient, messages)
+    go HandleConnection(conn, joinChan, leaveChan, messageChan, liveClients)
   }
 }
 
-func IdGenerator() {
-    var id uint64
-
-    for id = 0; ; id++ {
-      idGenerationChan <- strconv.FormatUint(id,10)
-    }
-}
-
-func HandleMessages(message <-chan Message, newClient <-chan Client, deadClient <-chan Client) {
+func HandleMessages(messageChan <-chan Message, joinChan <-chan Client, leaveChan <-chan Client, liveClients map[string]Client) {
   clients := make(map[net.Conn] chan<- Message)
 
   for {
 		select {
-  		case client := <-newClient:
-  			log.Printf("New client is connected. User ID: %s\n", client.userId)
-  			clients[client.conn] = client.ch
-  		case client := <-deadClient:
-  			log.Printf("Client is disconnected. User ID: %s\n", client.userId)
-  			delete(clients, client.conn)
-  		}
+    case msg := <- messageChan:
+      for _, ch := range clients {
+          go func (mch chan<- Message)  {
+              mch <- msg
+          }(ch)
+      }
+		case client := <-joinChan:
+      clients[client.conn] = client.message
+      liveClients[client.id] = client
+		case client := <-leaveChan:
+      delete(clients, client.conn)
+      delete(liveClients, client.id)
+  	}
 	}
 }
 
-func HandleConnection(conn net.Conn, newClient chan<- Client, deadClient chan<- Client, messages chan<- Message)  {
+func HandleConnection(conn net.Conn, joinChan chan<- Client, leaveChan chan<- Client, messageChan chan<- Message, liveClients map[string]Client)  {
   defer conn.Close()
 
+  scanner := bufio.NewScanner(conn)
+
+  var id = <- idGenerationChan
   client := Client{
+    message:  make(chan Message),
     conn:     conn,
-    userId:   <-idGenerationChan,
-    ch:       make(chan Message),
+    id:       id,
   }
+  io.WriteString(conn, "Welcome! Your User ID is " + id)
 
-  newClient <- client
+  joinChan <- client
 
-  go func(){
-    log.Printf("Connection from %v closed.\n", conn.RemoteAddr())
-    deadClient <- client
+  defer func(){
+    leaveChan <- client
   }()
 
-  go client.ReadIntoChan(messages)
-  client.WriteFromChan(client.ch)
-}
 
-func (c Client) ReadIntoChan(ch chan<- Message){
-  bufc := bufio.NewReader(c.conn)
-  for {
-      line, err := bufc.ReadBytes('\n')
-      lineString := string(line)
-      lineStringTrimSpace := strings.TrimSpace(lineString)
+  go func() {
+  	for scanner.Scan() {
+  		ln := scanner.Text()
+      if ln == "whoami" {
+        client.conn.Write([]byte("Your user id: "+client.id+"\n"))
+      }else if ln == "whoishere" {
+        ids := "";
+        for key, _ := range liveClients {
+          if (key != client.id) {
+            ids += key
+          }
+        }
+        client.conn.Write([]byte("Here is "+ids+"\n"))
+      }else {
+        messageChan <- Message{client.id, ln}
+      }
+  	}
+  }()
+
+
+  for msg := range client.message {
+    if msg.from != client.id {
+      _, err := io.WriteString(conn, msg.from+": "+msg.body+"\n")
       if err != nil {
-          break
-      }
-
-      if lineStringTrimSpace == "whoami" {
-        c.conn.Write([]byte("Your user id is "+c.userId+"\n"))
-      } else if lineStringTrimSpace == "whoishere" {
+        break
       }
     }
+  }
 }
 
-func (c Client) WriteFromChan(ch <-chan Message){
-  for msg := range ch{
-    messasge := fmt.Sprintf("%s: %s\n", msg.from, msg.body)
-
-    _, err := io.WriteString(c.conn, messasge)
-    if err != nil{
-        return
-    }
-
+func IdGenerator() {
+  var id uint64
+  for id = 0; ; id++ {
+    idGenerationChan <- strconv.FormatUint(id,10)
   }
 }
