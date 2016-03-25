@@ -40,15 +40,15 @@ func main() {
 
   defer hub.Close()
 
-  go IdGenerator()
-
   messageHub := &Hub{
 		Clients:      make(map[string]Client),
 		JoinChan:     make(chan Client),
 		LeaveChan:    make(chan Client),
 		MessageChan:  make(chan Message),
 	}
+
   go messageHub.Run()
+  go IdGenerator()
 
   fmt.Println("Listening on port 8000")
 
@@ -74,8 +74,10 @@ func (h *Hub) Run() {
 			}
     case client := <-h.JoinChan:
       h.Clients[client.Id] = client
+      fmt.Printf("New client join. User ID: %v\n", client.Id)
     case client := <-h.LeaveChan:
       delete(h.Clients, client.Id)
+      fmt.Printf("Client disconnects. User ID: %v\n", client.Id)
     }
   }
 }
@@ -86,12 +88,13 @@ func HandleConnection(conn net.Conn, h *Hub)  {
   scanner := bufio.NewScanner(conn)
 
   var id = <- idGenerationChan
+
   client := Client{
     MessageChan:  make(chan Message),
     Conn:     conn,
     Id:       id,
   }
-  io.WriteString(conn, "Welcome! Your User ID is " + id)
+  io.WriteString(conn, "Welcome! Your User ID: " + id + "\n")
 
   h.JoinChan <- client
 
@@ -99,35 +102,44 @@ func HandleConnection(conn net.Conn, h *Hub)  {
     h.LeaveChan <- client
   }()
 
-
   go func() {
   	for scanner.Scan() {
-  		ln := scanner.Text()
+  		ln := strings.TrimSpace(scanner.Text())
 
-      if ln == "whoami" {
-        client.Conn.Write([]byte("Your user Id: "+client.Id+"\n"))
-      }else if ln == "whoishere" {
-        ids := "";
-        for key, _ := range h.Clients {
-          if (key != client.Id) {
-            ids += key
+      if strings.EqualFold(ln, "whoami") {
+        client.Conn.Write([]byte("Your user ID: " + client.Id + "\n"))
+      }else if strings.EqualFold(ln, "whoishere") {
+        otherClients := GetOtherClients(client, h)
+
+        if len(otherClients) == 0 {
+          client.Conn.Write([]byte("Beside of you, there is no client connected now.\n"))
+        }else {
+          client.Conn.Write([]byte("Beside of you, there are " + strconv.Itoa(len(otherClients)) + " clients connected in total now.\n"))
+
+          for _, v := range otherClients {
+            client.Conn.Write([]byte("ID: " + v.Id+ "\n"))
           }
         }
-        client.Conn.Write([]byte("Here is "+ids+"\n"))
       }else if strings.Contains(ln, ":") {
         arr := strings.Split(ln, ":")
-        body := arr[0]
-        receivers := strings.Split(arr[1], ",")
 
-        for _, to := range receivers {
-          h.MessageChan <- Message{client.Id, to, body}
+        body := arr[0]
+              fmt.Println(arr[0])
+        receivers := strings.Split(arr[1], ",")
+              fmt.Println(arr[1])
+
+        if len(receivers) > 0 {
+          for _, to := range receivers {
+            h.MessageChan <- Message{client.Id, to, body}
+          }
+        } else {
+          for _, to := range GetOtherClients(client, h) {
+            h.MessageChan <- Message{client.Id, to.Id, body}
+          }
         }
-      }else {
-        h.MessageChan  <- Message{client.Id, "all", ln}
       }
   	}
   }()
-
 
   for msg := range client.MessageChan {
     if msg.To == client.Id {
@@ -137,6 +149,17 @@ func HandleConnection(conn net.Conn, h *Hub)  {
       }
     }
   }
+}
+
+func GetOtherClients(c Client, h *Hub) []Client{
+    otherClients := []Client{}
+
+    for _, v := range h.Clients {
+      if c.Id != v.Id {
+        otherClients = append(otherClients, v)
+      }
+    }
+    return otherClients
 }
 
 func IdGenerator() {
