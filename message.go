@@ -47,8 +47,8 @@ func main() {
 		MessageChan:  make(chan Message),
 	}
 
-  go messageHub.Run()
   go IdGenerator()
+  go messageHub.Run()
 
   fmt.Println("Listening on port 8000")
 
@@ -66,12 +66,12 @@ func (h *Hub) Run() {
   for {
     select {
     case msg := <- h.MessageChan:
-      for _, client := range h.Clients {
-				select {
-				case client.MessageChan <- msg:
-				default:
-				}
-			}
+      go func () {
+        for _, client := range h.Clients {
+          client.MessageChan <- msg
+        }
+      }()
+
     case client := <-h.JoinChan:
       h.Clients[client.Id] = client
       fmt.Printf("New client join. User ID: %v\n", client.Id)
@@ -122,19 +122,31 @@ func HandleConnection(conn net.Conn, h *Hub)  {
         }
       }else if strings.Contains(ln, ":") {
         arr := strings.Split(ln, ":")
-
         body := arr[0]
-              fmt.Println(arr[0])
-        receivers := strings.Split(arr[1], ",")
-              fmt.Println(arr[1])
 
-        if len(receivers) > 0 {
-          for _, to := range receivers {
-            h.MessageChan <- Message{client.Id, to, body}
+        if strings.HasSuffix(ln, ":") {
+          receivers := []string{}
+
+          for _, client := range GetOtherClients(client, h) {
+            receivers = append(receivers, client.Id)
           }
-        } else {
+
+          if !ValidateMessage(receivers, body, client) {
+            continue
+          }
+
           for _, to := range GetOtherClients(client, h) {
             h.MessageChan <- Message{client.Id, to.Id, body}
+          }
+        } else {
+          receivers := strings.Split(arr[1], ",")
+
+          if !ValidateMessage(receivers, body, client) {
+            continue
+          }
+
+          for _, to := range receivers {
+            h.MessageChan <- Message{client.Id, strings.TrimSpace(to), body}
           }
         }
       }
@@ -149,6 +161,7 @@ func HandleConnection(conn net.Conn, h *Hub)  {
       }
     }
   }
+
 }
 
 func GetOtherClients(c Client, h *Hub) []Client{
@@ -167,4 +180,18 @@ func IdGenerator() {
   for id = 0; ; id++ {
     idGenerationChan <- strconv.FormatUint(id,10)
   }
+}
+
+func ValidateMessage(receivers []string, body string, client Client) bool{
+  if len(receivers) > 255 {
+    client.Conn.Write([]byte("Maximum amount of receivers is 255. \n"))
+    return false
+  }
+
+  if len([]byte(body)) > 1024000 {
+    client.Conn.Write([]byte("Maximum length of message body is 1024 kilobytes. \n"))
+    return false
+  }
+
+  return true
 }
