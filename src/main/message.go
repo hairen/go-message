@@ -56,7 +56,6 @@ func main() {
     conn, err := hub.Accept()
     if err != nil {
       log.Fatalln(err.Error())
-      continue
     }
 
     go HandleConnection(conn, messageHub)
@@ -133,7 +132,7 @@ func HandleConnection(conn net.Conn, h *Hub)  {
             receivers = append(receivers, client.Id)
           }
 
-          if !ValidateMessage(receivers, body, client) {
+          if !ValidateMessage(receivers, body, client.Conn) {
             continue
           }
 
@@ -143,7 +142,7 @@ func HandleConnection(conn net.Conn, h *Hub)  {
         } else {
           receivers := strings.Split(arr[1], ",")
 
-          if !ValidateMessage(receivers, body, client) {
+          if !ValidateMessage(receivers, body, client.Conn) {
             continue
           }
 
@@ -157,22 +156,22 @@ func HandleConnection(conn net.Conn, h *Hub)  {
     errMsgs <- "User has left the chat room."
   }()
 
-  LOOP:
-  	for {
-  		select {
-      case msg := <-client.MessageChan:
-          if msg.To == client.Id {
-            _, err := io.WriteString(conn, "\n"+msg.From+": "+msg.Body+"\n")
-            if err != nil {
-              break LOOP
-            }
-          }
-  		case _, ok := <-errMsgs:
-  			if !ok {
-  				break LOOP
-  			}
-  		}
-  	}
+LOOP:
+  for {
+    select {
+    case msg := <-client.MessageChan:
+      if msg.To == client.Id {
+        _, err := io.WriteString(conn, "\n"+msg.From+": "+msg.Body+"\n")
+        if err != nil {
+          break LOOP
+        }
+      }
+    case _, ok := <-errMsgs:
+    	if !ok {
+    		break LOOP
+    	}
+    }
+  }
 
   conn.Close()
   h.LeaveChan <- client
@@ -196,14 +195,14 @@ func IdGenerator() {
   }
 }
 
-func ValidateMessage(receivers []string, body string, client Client) bool{
+func ValidateMessage(receivers []string, body string, conn net.Conn) bool{
   if len(receivers) > 255 {
-    client.Conn.Write([]byte("Maximum amount of receivers is 255. \n"))
+    conn.Write([]byte("Maximum amount of receivers is 255. \n"))
     return false
   }
 
   if len([]byte(body)) > 1024000 {
-    client.Conn.Write([]byte("Maximum length of message body is 1024 kilobytes. \n"))
+    conn.Write([]byte("Maximum length of message body is 1024 kilobytes. \n"))
     return false
   }
 
