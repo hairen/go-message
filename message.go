@@ -56,6 +56,7 @@ func main() {
     conn, err := hub.Accept()
     if err != nil {
       log.Fatalln(err.Error())
+      continue
     }
 
     go HandleConnection(conn, messageHub)
@@ -71,56 +72,57 @@ func (h *Hub) Run() {
           client.MessageChan <- msg
         }
       }()
-
     case client := <-h.JoinChan:
       h.Clients[client.Id] = client
       fmt.Printf("New client join. User ID: %v\n", client.Id)
     case client := <-h.LeaveChan:
       delete(h.Clients, client.Id)
-      fmt.Printf("Client disconnects. User ID: %v\n", client.Id)
+      fmt.Printf("Client left. User ID: %v\n", client.Id)
     }
   }
 }
 
 func HandleConnection(conn net.Conn, h *Hub)  {
-  defer conn.Close()
-
-  scanner := bufio.NewScanner(conn)
-
-  var id = <- idGenerationChan
+  errMsgs := make(chan string)
 
   client := Client{
     MessageChan:  make(chan Message),
     Conn:     conn,
-    Id:       id,
+    Id:       <- idGenerationChan,
   }
-  io.WriteString(conn, "Welcome! Your User ID: " + id + "\n")
+
+  io.WriteString(conn, "Welcome! Your User ID: " + client.Id + "\n")
 
   h.JoinChan <- client
 
-  defer func(){
-    h.LeaveChan <- client
-  }()
-
   go func() {
-  	for scanner.Scan() {
-  		ln := strings.TrimSpace(scanner.Text())
+    defer close(errMsgs)
+
+    bufc := bufio.NewReader(conn)
+
+    for {
+      line, _, err := bufc.ReadLine()
+			if err != nil {
+				break
+			}
+
+  		ln := strings.TrimSpace(string(line))
 
       if strings.EqualFold(ln, "whoami") {
         client.Conn.Write([]byte("Your user ID: " + client.Id + "\n"))
-      }else if strings.EqualFold(ln, "whoishere") {
+      } else if strings.EqualFold(ln, "whoishere") {
         otherClients := GetOtherClients(client, h)
 
         if len(otherClients) == 0 {
           client.Conn.Write([]byte("Beside of you, there is no client connected now.\n"))
-        }else {
-          client.Conn.Write([]byte("Beside of you, there are " + strconv.Itoa(len(otherClients)) + " clients connected in total now.\n"))
+        } else {
+          client.Conn.Write([]byte("Beside of you, there are other " + strconv.Itoa(len(otherClients)) + " clients connected in total now.\n"))
 
           for _, v := range otherClients {
             client.Conn.Write([]byte("ID: " + v.Id+ "\n"))
           }
         }
-      }else if strings.Contains(ln, ":") {
+      } else if strings.Contains(ln, ":") {
         arr := strings.Split(ln, ":")
         body := arr[0]
 
@@ -151,17 +153,29 @@ func HandleConnection(conn net.Conn, h *Hub)  {
         }
       }
   	}
+
+    errMsgs <- "User has left the chat room."
   }()
 
-  for msg := range client.MessageChan {
-    if msg.To == client.Id {
-      _, err := io.WriteString(conn, "\n"+msg.From+": "+msg.Body+"\n")
-      if err != nil {
-        break
-      }
-    }
-  }
+  LOOP:
+  	for {
+  		select {
+      case msg := <-client.MessageChan:
+          if msg.To == client.Id {
+            _, err := io.WriteString(conn, "\n"+msg.From+": "+msg.Body+"\n")
+            if err != nil {
+              break LOOP
+            }
+          }
+  		case _, ok := <-errMsgs:
+  			if !ok {
+  				break LOOP
+  			}
+  		}
+  	}
 
+  conn.Close()
+  h.LeaveChan <- client
 }
 
 func GetOtherClients(c Client, h *Hub) []Client{
