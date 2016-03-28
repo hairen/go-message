@@ -90,7 +90,8 @@ func HandleConnection(conn net.Conn, h *Hub)  {
     Id:       <- idGenerationChan,
   }
 
-  io.WriteString(conn, "Welcome! Your User ID: " + client.Id + "\n")
+  // io.WriteString(conn, "Welcome! Your User ID: " + client.Id + "\n")
+  io.WriteString(conn, "Tervetuloa!\n")
 
   h.JoinChan <- client
 
@@ -108,7 +109,7 @@ func HandleConnection(conn net.Conn, h *Hub)  {
   		ln := strings.TrimSpace(string(line))
 
       if strings.EqualFold(ln, "whoami") {
-        client.Conn.Write([]byte("Your user ID: " + client.Id + "\n"))
+        client.Conn.Write([]byte("Your User ID: " + client.Id + "\n"))
       } else if strings.EqualFold(ln, "whoishere") {
         otherClients := GetOtherClients(client, h)
 
