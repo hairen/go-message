@@ -12,14 +12,14 @@ Send _three_ types of messages
 -----------
 
 ### 1. Identity message
-    Command: "**whoami**"
+    Command: "whoami"
 ### 2. List message
-    Command: "**whoishere**"
+    Command: "whoishere"
 ### 3. Relay message
     Message body and receivers should be seperated by colon( **:** ). Each receivers'Id should be seperated by comma ( **,** ).
       * Broadcast message to all other clients connected. 
-          Example: "**Message to all:**"
+          Example: "Message to all:"
       * Send message to specific clients connected.
-          Example: "**Message to client1 and client2:1,2**"
+          Example: "Message to client1 and client2:1,2"
 
           
