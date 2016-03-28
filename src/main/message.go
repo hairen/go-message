@@ -116,11 +116,17 @@ func HandleConnection(conn net.Conn, h *Hub)  {
         if len(otherClients) == 0 {
           client.Conn.Write([]byte("Beside of you, there is no client connected now.\n"))
         } else {
-          client.Conn.Write([]byte("Beside of you, there are other " + strconv.Itoa(len(otherClients)) + " clients connected in total now.\n"))
+          idSlice := []string{}
 
           for _, v := range otherClients {
-            client.Conn.Write([]byte("ID: " + v.Id+ "\n"))
+            idSlice = append(idSlice, v.Id)
+            // client.Conn.Write([]byte("ID: " + v.Id+ "\n"))
           }
+
+          client.Conn.Write([]byte("Beside of you, there are other " +
+              strconv.Itoa(len(otherClients)) +
+              " clients connected in total now. IDs: " +
+              strings.Join(idSlice, ", ") + "\n"))
         }
       } else if strings.Contains(ln, ":") { // Handle relay message
         arr := strings.Split(ln, ":")
@@ -162,7 +168,7 @@ LOOP:
     select {
     case msg := <-client.MessageChan:
       if msg.To == client.Id {
-        _, err := io.WriteString(conn, "\n"+msg.From+": "+msg.Body+"\n")
+        _, err := io.WriteString(conn, msg.From+": "+msg.Body+"\n")
         if err != nil {
           break LOOP
         }
