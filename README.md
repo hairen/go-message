@@ -16,7 +16,8 @@ Send _three_ types of messages
 ### 2. List message
     Command: "whoishere"
 ### 3. Relay message
-    Message body and receivers should be seperated by colon( **:** ). Each receivers'Id should be seperated by comma ( **,** ).
+    Message body and receivers should be seperated by colon( **:** ). 
+    Each receivers'Id should be seperated by comma ( **,** ).
       * Broadcast message to all other clients connected. 
           Example: "Message to all:"
       * Send message to specific clients connected.
