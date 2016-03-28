@@ -31,6 +31,7 @@ type Hub struct {
 
 var idGenerationChan = make(chan string)
 
+// This example can setup a Hub and listen to client connection on port 8000
 func main() {
   hub, err := net.Listen("tcp", ":8000") // Create a hub on port 8000
 
@@ -47,8 +48,8 @@ func main() {
 		MessageChan:  make(chan Message),
 	}
 
-  go IdGenerator()
-  go messageHub.Run()
+  go IdGenerator() // Generate User ID routine
+  go messageHub.Run() // Spin up hub routine
 
   fmt.Println("Listening on port 8000")
 
@@ -58,7 +59,7 @@ func main() {
       log.Fatalln(err.Error())
     }
 
-    go HandleConnection(conn, messageHub)
+    go HandleConnection(conn, messageHub) // Client connection routine
   }
 }
 
@@ -90,7 +91,6 @@ func HandleConnection(conn net.Conn, h *Hub)  {
     Id:       <- idGenerationChan,
   }
 
-  // io.WriteString(conn, "Welcome! Your User ID: " + client.Id + "\n")
   io.WriteString(conn, "Tervetuloa!\n")
 
   h.JoinChan <- client
@@ -108,9 +108,9 @@ func HandleConnection(conn net.Conn, h *Hub)  {
 
   		ln := strings.TrimSpace(string(line))
 
-      if strings.EqualFold(ln, "whoami") {
+      if strings.EqualFold(ln, "whoami") { // Handle "whoami" message
         client.Conn.Write([]byte("Your User ID: " + client.Id + "\n"))
-      } else if strings.EqualFold(ln, "whoishere") {
+      } else if strings.EqualFold(ln, "whoishere") {   // Handle "whoishere" message
         otherClients := GetOtherClients(client, h)
 
         if len(otherClients) == 0 {
@@ -122,11 +122,11 @@ func HandleConnection(conn net.Conn, h *Hub)  {
             client.Conn.Write([]byte("ID: " + v.Id+ "\n"))
           }
         }
-      } else if strings.Contains(ln, ":") {
+      } else if strings.Contains(ln, ":") { // Handle relay message
         arr := strings.Split(ln, ":")
         body := arr[0]
 
-        if strings.HasSuffix(ln, ":") {
+        if strings.HasSuffix(ln, ":") { // User input ends with ":" means broadcasting
           receivers := []string{}
 
           for _, client := range GetOtherClients(client, h) {
@@ -140,7 +140,7 @@ func HandleConnection(conn net.Conn, h *Hub)  {
           for _, to := range GetOtherClients(client, h) {
             h.MessageChan <- Message{client.Id, to.Id, body}
           }
-        } else {
+        } else { // User input doesn't end with ":" means send message to specific receivers
           receivers := strings.Split(arr[1], ",")
 
           if !ValidateMessage(receivers, body, client.Conn) {
@@ -169,7 +169,7 @@ LOOP:
       }
     case _, ok := <-errMsgs:
     	if !ok {
-    		break LOOP
+        break LOOP
     	}
     }
   }
@@ -178,6 +178,7 @@ LOOP:
   h.LeaveChan <- client
 }
 
+// Get other clients connected to hub
 func GetOtherClients(c Client, h *Hub) []Client{
     otherClients := []Client{}
 
@@ -189,6 +190,7 @@ func GetOtherClients(c Client, h *Hub) []Client{
     return otherClients
 }
 
+// Generate User ID
 func IdGenerator() {
   var id uint64
   for id = 0; ; id++ {
@@ -196,6 +198,7 @@ func IdGenerator() {
   }
 }
 
+// Validate message, max 255 receivers, 1024 KB message body
 func ValidateMessage(receivers []string, body string, conn net.Conn) bool{
   if len(receivers) > 255 {
     conn.Write([]byte("Maximum amount of receivers is 255. \n"))

@@ -45,22 +45,6 @@ func Test_HandleConnection(t *testing.T) {
   } else {
     t.Error("In case of only one client connected, testing 'whoishere' message failed.")
   }
-
-  // In case of mutiple clients are connected, test client can send out "whoishere" message, and get response as expected.
-
-  // if net.Dial("tcp", "localhost:8000") {
-  //   conn0.Write([]byte("whoishere\n"))
-  //   bufc = bufio.NewReader(conn0)
-  //   line, _ = bufc.ReadString('\n')
-  //   ln = strings.TrimSpace(line)
-  //
-  //   if strings.EqualFold(ln, "Beside of you, there is no client connected now.") {
-  //     t.Log("In case of only one client connected, client can send out 'whoishere' message.")
-  //     } else {
-  //       // t.Error("In case of only one client connected, testing 'whoishere' message failed.")
-  //       t.Log(ln)
-  //     }
-  // }
 }
 
 func Test_ValidateMessage(t *testing.T) {
